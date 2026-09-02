@@ -43,7 +43,7 @@ impl eframe::App for LabApp {
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
-        "Lab Multi-Tab App",
+        "Lab1",
         options,
         Box::new(|cc| Ok(Box::new(LabApp::new(cc)))),
     )
