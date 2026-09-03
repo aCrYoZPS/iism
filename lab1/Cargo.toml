@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 eframe = "0.33.3"
 rand = "0.10.2"
+serde = {version="1.0.229", features = ["derive"]}
+toml = "1.1.5"

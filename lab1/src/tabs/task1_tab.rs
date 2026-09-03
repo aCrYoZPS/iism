@@ -1,4 +1,4 @@
-use crate::common::tab::Tab;
+use crate::common::{colors, tab::Tab};
 use eframe::egui::{self, text::LayoutJob, text::TextFormat};
 
 const DEFAULT_PROBABILITY: f64 = 0.5;
@@ -46,9 +46,9 @@ impl Tab for Task1Tab {
             if let Some(draw) = self.last_draw {
                 let hit = draw < self.probability;
                 let (label, color) = if hit {
-                    ("True", egui::Color32::from_rgb(0x2e, 0x7d, 0x32))
+                    ("True", colors::GREEN)
                 } else {
-                    ("False", egui::Color32::from_rgb(0xc6, 0x28, 0x28))
+                    ("False", colors::RED)
                 };
 
                 ui.label(

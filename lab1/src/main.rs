@@ -2,6 +2,10 @@ mod common;
 mod tabs;
 
 use crate::tabs::task1_tab::*;
+use crate::tabs::task2_tab::*;
+use crate::tabs::task3_tab::*;
+use crate::tabs::task4_tab::*;
+use crate::tabs::task5_tab::*;
 use common::tab::Tab;
 use eframe::egui;
 
@@ -12,7 +16,13 @@ struct LabApp {
 
 impl LabApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let tabs: Vec<Box<dyn Tab>> = vec![Box::new(Task1Tab::new())];
+        let tabs: Vec<Box<dyn Tab>> = vec![
+            Box::new(Task1Tab::new()),
+            Box::new(Task2Tab::new()),
+            Box::new(Task3Tab::new()),
+            Box::new(Task4Tab::new()),
+            Box::new(Task5Tab::new()),
+        ];
 
         Self {
             selected_tab: 0,
