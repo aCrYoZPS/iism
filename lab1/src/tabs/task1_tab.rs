@@ -1,18 +1,19 @@
 use crate::common::tab::Tab;
-use eframe::egui;
-use rand;
+use eframe::egui::{self, text::LayoutJob, text::TextFormat};
+
+const DEFAULT_PROBABILITY: f64 = 0.5;
 
 #[derive(Debug)]
 pub struct Task1Tab {
     probability: f64,
-    text: Option<String>,
+    last_draw: Option<f64>,
 }
 
 impl Task1Tab {
     pub fn new() -> Self {
         Self {
-            probability: 0.5,
-            text: None,
+            probability: DEFAULT_PROBABILITY,
+            last_draw: None,
         }
     }
 }
@@ -23,25 +24,55 @@ impl Tab for Task1Tab {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Task1");
+        ui.heading(self.name());
 
-        ui.add(
-            egui::Slider::new(&mut self.probability, 0.0..=1.0)
-                .text("Probability (0–1)"),
-        );
+        ui.add_space(8.0);
 
-        if ui.button("Compute").clicked() {
-            let border: f64 = rand::random();
-            if border <= self.probability {
-                self.text = Some(String::from("True"));
-            } else {
-                self.text = Some(String::from("False"));
+        ui.group(|ui| {
+            ui.set_min_width(ui.available_width());
+            ui.add(
+                egui::Slider::new(&mut self.probability, 0.0..=1.0)
+                    .text("Probability (0–1)"),
+            );
+
+            ui.add_space(8.0);
+
+            if ui.button("Compute").clicked() {
+                self.last_draw = Some(rand::random());
             }
-        }
 
-        ui.label(match &self.text {
-            Some(txt) => txt,
-            None => "",
+            ui.separator();
+
+            if let Some(draw) = self.last_draw {
+                let hit = draw < self.probability;
+                let (label, color) = if hit {
+                    ("True", egui::Color32::from_rgb(0x2e, 0x7d, 0x32))
+                } else {
+                    ("False", egui::Color32::from_rgb(0xc6, 0x28, 0x28))
+                };
+
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Draw: {draw:.3} · Probability {:.3}",
+                        self.probability
+                    ))
+                    .weak(),
+                );
+
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                let mut job = LayoutJob::default();
+                job.append(
+                    "Result: ",
+                    0.0,
+                    TextFormat::simple(font.clone(), ui.visuals().text_color()),
+                );
+                job.append(label, 0.0, TextFormat::simple(font, color));
+
+                ui.label(job);
+            } else {
+                ui.label(egui::RichText::new("-").weak());
+                ui.label(egui::RichText::new(" ").weak());
+            }
         });
     }
 }
