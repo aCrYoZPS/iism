@@ -3,6 +3,7 @@ use std::{collections::HashMap, fs, path::PathBuf};
 use crate::common::{colors, tab::Tab};
 
 use eframe::egui;
+use rand::seq::SliceRandom;
 
 #[derive(Debug, Clone)]
 struct Team {
@@ -34,16 +35,20 @@ enum TournamentState {
 #[derive(Debug)]
 pub struct Task5Tab {
     teams: Vec<Team>,
+    current_round: Vec<usize>,
+    next_round: Vec<usize>,
 
-    current_round: usize,
+    round_number: usize,
     total_rounds: usize,
 
     round_results: Vec<MatchResult>,
     history: Vec<MatchResult>,
 
-    standings: Vec<usize>,
-    state: TournamentState,
+    eliminated_by_round: Vec<Vec<usize>>,
 
+    standings: Vec<usize>,
+
+    state: TournamentState,
     load_error: Option<String>,
 }
 
@@ -51,15 +56,19 @@ impl Task5Tab {
     pub fn new() -> Self {
         let mut tab = Self {
             teams: Vec::new(),
-            current_round: 0,
+            current_round: Vec::new(),
+            next_round: Vec::new(),
+
+            round_number: 0,
             total_rounds: 0,
 
             round_results: Vec::new(),
             history: Vec::new(),
 
+            eliminated_by_round: Vec::new(),
             standings: Vec::new(),
-            state: TournamentState::NotStarted,
 
+            state: TournamentState::NotStarted,
             load_error: None,
         };
 
@@ -76,9 +85,11 @@ impl Task5Tab {
 
     fn load_teams(&mut self) {
         self.teams.clear();
-        self.current_round = 0;
+        self.current_round.clear();
+        self.next_round.clear();
         self.round_results.clear();
         self.history.clear();
+        self.eliminated_by_round.clear();
         self.standings.clear();
 
         let path = Self::teams_path();
@@ -167,10 +178,19 @@ impl Task5Tab {
             team.stage_reached = 0;
         }
 
-        self.current_round = 1;
+        self.current_round = (0..self.teams.len()).collect();
+
+        let mut rng = rand::rng();
+        self.current_round.shuffle(&mut rng);
+
+        self.next_round.clear();
+
+        self.round_number = 0;
 
         self.round_results.clear();
         self.history.clear();
+
+        self.eliminated_by_round.clear();
         self.standings.clear();
 
         self.state = TournamentState::NotStarted;
@@ -180,29 +200,41 @@ impl Task5Tab {
         self.reset_tournament();
 
         if self.teams.len() == 1 {
-            self.teams[0].current_place = Some(1);
-            self.standings.push(0);
+            self.build_final_standings(0);
             self.state = TournamentState::Finished;
         }
     }
 
     fn winner_probability(left_rating: f64, right_rating: f64) -> f64 {
-        1.0 / (1.0 + 10.0f64.powf((left_rating - right_rating) / 78.0))
+        let difference = left_rating - right_rating;
+        1.0 / (1.0 + 10.0f64.powf(difference / 78.0))
     }
 
     fn choose_winner(left: &Team, right: &Team) -> bool {
         let left_probability =
             Self::winner_probability(left.rating, right.rating);
-
         rand::random::<f64>() < left_probability
     }
 
-    fn make_step(&mut self) {
-        if self.teams.is_empty() {
-            return;
-        }
+    fn build_final_standings(&mut self, champion_index: usize) {
+        self.standings.clear();
 
-        if self.state == TournamentState::Finished {
+        self.teams[champion_index].current_place = Some(1);
+        self.standings.push(champion_index);
+
+        let mut place = 2;
+
+        for eliminated_in_round in self.eliminated_by_round.iter().rev() {
+            for &team_index in eliminated_in_round {
+                self.teams[team_index].current_place = Some(place);
+                self.standings.push(team_index);
+                place += 1;
+            }
+        }
+    }
+
+    fn make_step(&mut self) {
+        if self.teams.is_empty() || self.state == TournamentState::Finished {
             return;
         }
 
@@ -215,12 +247,13 @@ impl Task5Tab {
         }
 
         self.round_number += 1;
+
         self.round_results.clear();
         self.next_round.clear();
 
-        let pairs = self.current_round.chunks_exact(2);
+        let mut eliminated_this_round = Vec::new();
 
-        for pair in pairs {
+        for pair in self.current_round.chunks_exact(2) {
             let left_index = pair[0];
             let right_index = pair[1];
 
@@ -235,37 +268,35 @@ impl Task5Tab {
                 (right_index, left_index)
             };
 
-            let winner = self.teams[winner_index].clone();
-            let loser = self.teams[loser_index].clone();
-
             self.teams[winner_index].stage_reached = self.round_number;
 
             self.teams[loser_index].eliminated = true;
-            self.teams[loser_index].current_place =
-                Some(self.teams.len() - self.standings.len() - 1);
+            self.teams[loser_index].stage_reached = self.round_number;
 
-            self.standings.push(loser_index);
+            self.teams[loser_index].current_place = None;
+
+            eliminated_this_round.push(loser_index);
             self.next_round.push(winner_index);
 
             self.round_results.push(MatchResult {
                 left: left.name,
                 right: right.name,
-                winner: winner.name,
-                loser: loser.name,
+                winner: self.teams[winner_index].name.clone(),
+                loser: self.teams[loser_index].name.clone(),
                 left_rating: left.rating,
                 right_rating: right.rating,
             });
         }
 
         self.history.extend(self.round_results.clone());
+        self.eliminated_by_round.push(eliminated_this_round);
 
         self.current_round = std::mem::take(&mut self.next_round);
 
         if self.current_round.len() == 1 {
-            let winner_index = self.current_round[0];
+            let champion_index = self.current_round[0];
 
-            self.teams[winner_index].current_place = Some(1);
-            self.standings.insert(0, winner_index);
+            self.build_final_standings(champion_index);
 
             self.state = TournamentState::Finished;
         } else {
@@ -290,9 +321,7 @@ impl Task5Tab {
             return format!("Round of {}", self.teams.len());
         }
 
-        let remaining = self.current_round.len();
-
-        match remaining {
+        match self.current_round.len() {
             2 => "Final".to_owned(),
             4 => "Semifinal".to_owned(),
             8 => "Quarterfinal".to_owned(),
@@ -301,6 +330,10 @@ impl Task5Tab {
     }
 
     fn winner_index(&self) -> Option<usize> {
+        if self.state != TournamentState::Finished {
+            return None;
+        }
+
         self.teams
             .iter()
             .position(|team| team.current_place == Some(1))
@@ -325,7 +358,6 @@ impl Task5Tab {
                 indices.sort_by(|&left, &right| {
                     let left_place =
                         self.teams[left].current_place.unwrap_or(usize::MAX);
-
                     let right_place =
                         self.teams[right].current_place.unwrap_or(usize::MAX);
 
@@ -378,10 +410,12 @@ impl Task5Tab {
     fn draw_standings(&self, ui: &mut egui::Ui) {
         ui.heading("Standings");
 
-        if self.standings.is_empty() {
+        if self.state != TournamentState::Finished {
             ui.label(
-                egui::RichText::new("No final places have been assigned yet.")
-                    .weak(),
+                egui::RichText::new(
+                    "Final standings will be available after the final match.",
+                )
+                .weak(),
             );
             return;
         }
@@ -399,8 +433,27 @@ impl Task5Tab {
                 {
                     let team = &self.teams[team_index];
 
-                    ui.label(format!("{}", position + 1));
-                    ui.label(&team.name);
+                    let label_text: String;
+                    if position <= 1 {
+                        label_text = (position + 1).to_string()
+                    } else {
+                        let lower_equivalent = 2u32.pow((position).ilog2()) + 1;
+                        let higher_equivalent =
+                            2u32.pow((position).ilog2() + 1);
+                        label_text =
+                            format!("{lower_equivalent}-{higher_equivalent}");
+                    }
+                    ui.label(label_text);
+
+                    if position == 0 {
+                        ui.label(
+                            egui::RichText::new(&team.name)
+                                .color(colors::GREEN),
+                        );
+                    } else {
+                        ui.label(&team.name);
+                    }
+
                     ui.label(format!("{:.0}", team.rating));
                     ui.end_row();
                 }
@@ -412,10 +465,8 @@ impl Task5Tab {
 
         if self.round_results.is_empty() {
             ui.label(
-                egui::RichText::new(
-                    "Press “Make step” to simulate the next stage.",
-                )
-                .weak(),
+                egui::RichText::new("Press \u{201c}Make step\u{201d} to simulate the next stage.")
+                    .weak(),
             );
             return;
         }
@@ -432,21 +483,17 @@ impl Task5Tab {
 
                 for result in &self.round_results {
                     ui.label(format!("{} vs {}", result.left, result.right));
-
                     ui.label(format!(
                         "{:.0} : {:.0}",
                         result.left_rating, result.right_rating
                     ));
-
                     ui.label(
                         egui::RichText::new(&result.winner)
                             .color(colors::GREEN),
                     );
-
                     ui.label(
                         egui::RichText::new(&result.loser).color(colors::RED),
                     );
-
                     ui.end_row();
                 }
             });
@@ -470,17 +517,11 @@ impl Tab for Task5Tab {
 
         ui.horizontal(|ui| {
             ui.label(format!("Stage: {}", self.stage_label()));
-
             ui.separator();
-
             ui.label(format!("Status: {}", self.state_label()));
-
             ui.separator();
-
             ui.label(format!("Teams: {}", self.teams.len()));
-
             ui.separator();
-
             ui.label(format!(
                 "Round: {}/{}",
                 self.round_number, self.total_rounds
@@ -505,7 +546,6 @@ impl Tab for Task5Tab {
 
             if let Some(winner_index) = self.winner_index() {
                 ui.separator();
-
                 ui.label(
                     egui::RichText::new(format!(
                         "Winner: {}",
@@ -522,13 +562,9 @@ impl Tab for Task5Tab {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 self.draw_round_results(ui);
-
                 ui.add_space(16.0);
-
                 self.draw_standings(ui);
-
                 ui.add_space(16.0);
-
                 self.draw_team_info(ui);
             });
     }
