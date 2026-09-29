@@ -1,10 +1,17 @@
 use std::vec;
 
-use crate::common::{colors, tab::Tab, utils};
+use crate::common::{colors, sampling, stats, tab::Tab, utils};
 use eframe::egui::{
     self,
     text::{LayoutJob, TextFormat},
 };
+
+#[derive(Debug)]
+struct RunStats {
+    runs: u32,
+    probabilities: Vec<f64>,
+    hits: Vec<u64>,
+}
 
 #[derive(Debug)]
 pub struct Task2Tab {
@@ -12,6 +19,8 @@ pub struct Task2Tab {
     probabilities: Vec<f64>,
     draws: Vec<f64>,
     parse_error: Option<String>,
+    runs: u32,
+    stats: Option<RunStats>,
 }
 
 impl Task2Tab {
@@ -21,7 +30,57 @@ impl Task2Tab {
             probabilities: vec![],
             draws: vec![],
             parse_error: None,
+            runs: stats::DEFAULT_RUNS,
+            stats: None,
         }
+    }
+
+    fn run_many(&mut self) -> Result<(), String> {
+        let probabilities = utils::parse_probability_list(&self.input_text)?;
+
+        if probabilities.is_empty() {
+            return Err("Enter at least one probability.".to_owned());
+        }
+
+        let mut hits = vec![0u64; probabilities.len()];
+
+        for _ in 0..self.runs {
+            for (hit_count, &probability) in hits.iter_mut().zip(&probabilities)
+            {
+                if sampling::is_hit(rand::random(), probability) {
+                    *hit_count += 1;
+                }
+            }
+        }
+
+        self.stats = Some(RunStats {
+            runs: self.runs,
+            probabilities,
+            hits,
+        });
+
+        Ok(())
+    }
+
+    fn draw_stats(&self, ui: &mut egui::Ui) {
+        let Some(run) = &self.stats else {
+            return;
+        };
+
+        ui.heading(format!("Statistics ({} runs)", run.runs));
+
+        let labels: Vec<String> = (1..=run.probabilities.len())
+            .map(|index| format!("P{index}"))
+            .collect();
+
+        stats::show_frequency_report(
+            ui,
+            "task2_stats",
+            run.runs as u64,
+            &labels,
+            &run.probabilities,
+            &run.hits,
+        );
     }
 }
 
@@ -42,18 +101,12 @@ impl Tab for Task2Tab {
             ui.add_space(8.0);
 
             if ui.button("Compute").clicked() {
-                match self
-                    .input_text
-                    .split(|c: char| c == ',' || c.is_whitespace())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| utils::parse_in_range(s, 0.0, 1.0))
-                    .collect::<Result<Vec<_>, _>>()
-                {
+                match utils::parse_probability_list(&self.input_text) {
                     Ok(vals) => {
                         self.probabilities = vals;
                         self.parse_error = None;
                     }
-                    Err(e) => self.parse_error = Some(e.to_string()),
+                    Err(e) => self.parse_error = Some(e),
                 }
 
                 self.draws.clear();
@@ -135,6 +188,16 @@ impl Tab for Task2Tab {
             ui.add_space(6.0);
 
             ui.label(results_job);
+
+            ui.separator();
+
+            if stats::runs_control(ui, &mut self.runs) {
+                self.parse_error = self.run_many().err();
+            }
+
+            ui.add_space(8.0);
+
+            self.draw_stats(ui);
 
             // if let Some(draw) = self.last_draw {
             //     let hit = draw < self.probability;

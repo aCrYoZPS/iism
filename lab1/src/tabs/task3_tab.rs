@@ -1,4 +1,4 @@
-use crate::common::{colors, tab::Tab, utils};
+use crate::common::{colors, sampling, stats, tab::Tab, utils};
 use eframe::egui::{
     self,
     text::{LayoutJob, TextFormat},
@@ -21,6 +21,22 @@ impl Outcome {
             Self::NotANotB => "3",
         }
     }
+
+    fn from_index(index: usize) -> Self {
+        match index {
+            0 => Self::AB,
+            1 => Self::ANotB,
+            2 => Self::NotAB,
+            _ => Self::NotANotB,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RunStats {
+    runs: u32,
+    probabilities: [f64; 4],
+    counts: [u64; 4],
 }
 
 #[derive(Debug)]
@@ -34,6 +50,9 @@ pub struct Task3Tab {
     outcome: Option<Outcome>,
 
     parse_error: Option<String>,
+
+    runs: u32,
+    stats: Option<RunStats>,
 }
 
 impl Task3Tab {
@@ -48,6 +67,9 @@ impl Task3Tab {
             outcome: None,
 
             parse_error: None,
+
+            runs: stats::DEFAULT_RUNS,
+            stats: None,
         }
     }
 
@@ -56,25 +78,11 @@ impl Task3Tab {
     }
 
     fn sample(draw: f64, probabilities: [f64; 4]) -> Outcome {
-        let mut cumulative = 0.0;
-
-        for (idx, probability) in probabilities.iter().enumerate() {
-            cumulative += probability;
-
-            if draw < cumulative || idx == probabilities.len() - 1 {
-                return match idx {
-                    0 => Outcome::AB,
-                    1 => Outcome::ANotB,
-                    2 => Outcome::NotAB,
-                    _ => Outcome::NotANotB,
-                };
-            }
-        }
-
-        unreachable!()
+        let cumulative = sampling::cumulative(&probabilities);
+        Outcome::from_index(sampling::pick_index(&cumulative, draw))
     }
 
-    fn compute(&mut self) -> Result<(), String> {
+    fn joint_probabilities(&self) -> Result<[f64; 4], String> {
         let p_a = Self::parse_probability(&self.p_a_text)?;
         let p_b_given_a = Self::parse_probability(&self.p_b_given_a_text)?;
         let p_b = Self::parse_probability(&self.p_b_text)?;
@@ -106,10 +114,16 @@ impl Task3Tab {
 
         let total: f64 = probabilities.iter().sum();
 
-        if total != 1.0 {
+        if (total - 1.0).abs() > 1e-9 {
             return Err("Invalid probabilities: the total is not equal to 1."
                 .to_owned());
         }
+
+        Ok(probabilities)
+    }
+
+    fn compute(&mut self) -> Result<(), String> {
+        let probabilities = self.joint_probabilities()?;
 
         let draw = rand::random::<f64>();
 
@@ -118,6 +132,57 @@ impl Task3Tab {
         self.outcome = Some(Self::sample(draw, probabilities));
 
         Ok(())
+    }
+
+    fn run_many(&mut self) -> Result<(), String> {
+        let probabilities = self.joint_probabilities()?;
+        let cumulative = sampling::cumulative(&probabilities);
+
+        let mut counts = [0u64; 4];
+
+        for _ in 0..self.runs {
+            counts[sampling::pick_index(&cumulative, rand::random())] += 1;
+        }
+
+        self.stats = Some(RunStats {
+            runs: self.runs,
+            probabilities,
+            counts,
+        });
+
+        Ok(())
+    }
+
+    fn draw_stats(&self, ui: &mut egui::Ui) {
+        let Some(run) = &self.stats else {
+            return;
+        };
+
+        ui.heading(format!("Statistics ({} runs)", run.runs));
+
+        let labels: Vec<String> = [
+            "0 (A, B)",
+            "1 (A, \u{ac}B)",
+            "2 (\u{ac}A, B)",
+            "3 (\u{ac}A, \u{ac}B)",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+
+        stats::show_frequency_report(
+            ui,
+            "task3_stats",
+            run.runs as u64,
+            &labels,
+            &run.probabilities,
+            &run.counts,
+        );
+
+        ui.add_space(8.0);
+
+        if let Some(test) = stats::chi_square(&run.counts, &run.probabilities) {
+            stats::show_chi_square(ui, &test);
+        }
     }
 }
 
@@ -186,10 +251,10 @@ impl Tab for Task3Tab {
             if let Some([p_ab, p_a_not_b, p_not_a_b, p_not_a_not_b]) =
                 self.probabilities
             {
-                ui.label(format!("P(AB) = {p_ab:.4}"));
-                ui.label(format!("P(AB̄) = {p_a_not_b:.4}"));
-                ui.label(format!("P(ĀB) = {p_not_a_b:.4}"));
-                ui.label(format!("P(ĀB̄) = {p_not_a_not_b:.4}"));
+                ui.label(format!("P(A, B) = {p_ab:.4}"));
+                ui.label(format!("P(A, ¬B) = {p_a_not_b:.4}"));
+                ui.label(format!("P(¬A, B) = {p_not_a_b:.4}"));
+                ui.label(format!("P(¬A, ¬B) = {p_not_a_not_b:.4}"));
 
                 ui.add_space(8.0);
 
@@ -236,6 +301,16 @@ impl Tab for Task3Tab {
                     .weak(),
                 );
             }
+
+            ui.separator();
+
+            if stats::runs_control(ui, &mut self.runs) {
+                self.parse_error = self.run_many().err();
+            }
+
+            ui.add_space(8.0);
+
+            self.draw_stats(ui);
         });
     }
 }

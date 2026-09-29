@@ -1,8 +1,15 @@
-use crate::common::{colors, tab::Tab, utils};
+use crate::common::{colors, sampling, stats, tab::Tab, utils};
 use eframe::egui::{
     self,
     text::{LayoutJob, TextFormat},
 };
+
+#[derive(Debug)]
+struct RunStats {
+    runs: u32,
+    probabilities: Vec<f64>,
+    counts: Vec<u64>,
+}
 
 #[derive(Debug)]
 pub struct Task4Tab {
@@ -12,6 +19,8 @@ pub struct Task4Tab {
     draw: Option<f64>,
     result: Option<usize>,
     parse_error: Option<String>,
+    runs: u32,
+    stats: Option<RunStats>,
 }
 
 impl Task4Tab {
@@ -23,18 +32,13 @@ impl Task4Tab {
             draw: None,
             result: None,
             parse_error: None,
+            runs: stats::DEFAULT_RUNS,
+            stats: None,
         }
     }
 
     fn parse_probabilities(input: &str) -> Result<Vec<f64>, String> {
-        let probabilities = input
-            .split(|c: char| c == ',' || c.is_whitespace())
-            .filter(|part| !part.is_empty())
-            .map(|part| {
-                utils::parse_in_range(part, 0.0, 1.0)
-                    .map_err(|error| error.to_string())
-            })
-            .collect::<Result<Vec<f64>, String>>()?;
+        let probabilities = utils::parse_probability_list(input)?;
 
         if probabilities.is_empty() {
             return Err("Enter at least one probability.".to_owned());
@@ -54,25 +58,11 @@ impl Task4Tab {
     fn compute(&mut self) -> Result<(), String> {
         let probabilities = Self::parse_probabilities(&self.input_text)?;
 
-        let mut cumulative = Vec::with_capacity(probabilities.len());
-        let mut sum = 0.0;
-
-        for probability in &probabilities {
-            sum += probability;
-            cumulative.push(sum);
-        }
-
-        // Avoid a possible floating-point value slightly below 1.0.
-        if let Some(last) = cumulative.last_mut() {
-            *last = 1.0;
-        }
+        let cumulative = sampling::cumulative(&probabilities);
 
         let draw = rand::random::<f64>();
 
-        let result = cumulative
-            .iter()
-            .position(|upper_bound| draw < *upper_bound)
-            .unwrap_or(probabilities.len() - 1);
+        let result = sampling::pick_index(&cumulative, draw);
 
         self.probabilities = probabilities;
         self.cumulative = cumulative;
@@ -80,6 +70,52 @@ impl Task4Tab {
         self.result = Some(result);
 
         Ok(())
+    }
+
+    fn run_many(&mut self) -> Result<(), String> {
+        let probabilities = Self::parse_probabilities(&self.input_text)?;
+        let cumulative = sampling::cumulative(&probabilities);
+
+        let mut counts = vec![0u64; probabilities.len()];
+
+        for _ in 0..self.runs {
+            counts[sampling::pick_index(&cumulative, rand::random())] += 1;
+        }
+
+        self.stats = Some(RunStats {
+            runs: self.runs,
+            probabilities,
+            counts,
+        });
+
+        Ok(())
+    }
+
+    fn draw_stats(&self, ui: &mut egui::Ui) {
+        let Some(run) = &self.stats else {
+            return;
+        };
+
+        ui.heading(format!("Statistics ({} runs)", run.runs));
+
+        let labels: Vec<String> = (0..run.probabilities.len())
+            .map(|index| index.to_string())
+            .collect();
+
+        stats::show_frequency_report(
+            ui,
+            "task4_stats",
+            run.runs as u64,
+            &labels,
+            &run.probabilities,
+            &run.counts,
+        );
+
+        ui.add_space(8.0);
+
+        if let Some(test) = stats::chi_square(&run.counts, &run.probabilities) {
+            stats::show_chi_square(ui, &test);
+        }
     }
 }
 
@@ -247,6 +283,16 @@ impl Tab for Task4Tab {
                     .weak(),
                 );
             }
+
+            ui.separator();
+
+            if stats::runs_control(ui, &mut self.runs) {
+                self.parse_error = self.run_many().err();
+            }
+
+            ui.add_space(8.0);
+
+            self.draw_stats(ui);
         });
     }
 }

@@ -1,9 +1,56 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
-use crate::common::{colors, tab::Tab};
+use crate::common::{colors, stats, tab::Tab};
 
 use eframe::egui;
 use rand::seq::SliceRandom;
+
+fn winner_probability(left_rating: f64, right_rating: f64) -> f64 {
+    let difference = right_rating - left_rating;
+    1.0 / (1.0 + 10.0f64.powf(difference / 78.0))
+}
+
+fn left_wins(left_rating: f64, right_rating: f64, draw: f64) -> bool {
+    draw < winner_probability(left_rating, right_rating)
+}
+
+fn simulate_tournament(
+    ratings: &[f64],
+    bracket: &[usize],
+    draw: &mut impl FnMut() -> f64,
+) -> Vec<usize> {
+    let mut rounds_won = vec![0; ratings.len()];
+    let mut current = bracket.to_vec();
+
+    while current.len() > 1 {
+        let mut next = Vec::with_capacity(current.len() / 2);
+
+        for pair in current.chunks_exact(2) {
+            let (left, right) = (pair[0], pair[1]);
+
+            let winner = if left_wins(ratings[left], ratings[right], draw()) {
+                left
+            } else {
+                right
+            };
+
+            rounds_won[winner] += 1;
+            next.push(winner);
+        }
+
+        current = next;
+    }
+
+    rounds_won
+}
+
+#[derive(Debug)]
+struct RunStats {
+    runs: u32,
+    titles: Vec<u64>,
+    finals: Vec<u64>,
+    rounds_won: Vec<u64>,
+}
 
 #[derive(Debug, Clone)]
 struct Team {
@@ -50,6 +97,9 @@ pub struct Task5Tab {
 
     state: TournamentState,
     load_error: Option<String>,
+
+    runs: u32,
+    stats: Option<RunStats>,
 }
 
 impl Task5Tab {
@@ -70,6 +120,9 @@ impl Task5Tab {
 
             state: TournamentState::NotStarted,
             load_error: None,
+
+            runs: stats::DEFAULT_RUNS,
+            stats: None,
         };
 
         tab.load_teams();
@@ -91,6 +144,7 @@ impl Task5Tab {
         self.history.clear();
         self.eliminated_by_round.clear();
         self.standings.clear();
+        self.stats = None;
 
         let path = Self::teams_path();
 
@@ -205,15 +259,48 @@ impl Task5Tab {
         }
     }
 
-    fn winner_probability(left_rating: f64, right_rating: f64) -> f64 {
-        let difference = left_rating - right_rating;
-        1.0 / (1.0 + 10.0f64.powf(difference / 78.0))
+    fn choose_winner(left: &Team, right: &Team) -> bool {
+        left_wins(left.rating, right.rating, rand::random())
     }
 
-    fn choose_winner(left: &Team, right: &Team) -> bool {
-        let left_probability =
-            Self::winner_probability(left.rating, right.rating);
-        rand::random::<f64>() < left_probability
+    fn run_many(&mut self) {
+        let ratings: Vec<f64> =
+            self.teams.iter().map(|team| team.rating).collect();
+        let team_count = ratings.len();
+        let total_rounds = self.total_rounds;
+
+        let mut titles = vec![0u64; team_count];
+        let mut finals = vec![0u64; team_count];
+        let mut rounds_won = vec![0u64; team_count];
+
+        let mut rng = rand::rng();
+        let mut bracket: Vec<usize> = (0..team_count).collect();
+
+        for _ in 0..self.runs {
+            bracket.shuffle(&mut rng);
+
+            let won =
+                simulate_tournament(&ratings, &bracket, &mut || rand::random());
+
+            for (team, &wins) in won.iter().enumerate() {
+                rounds_won[team] += wins as u64;
+
+                if wins == total_rounds {
+                    titles[team] += 1;
+                }
+
+                if wins + 1 >= total_rounds {
+                    finals[team] += 1;
+                }
+            }
+        }
+
+        self.stats = Some(RunStats {
+            runs: self.runs,
+            titles,
+            finals,
+            rounds_won,
+        });
     }
 
     fn build_final_standings(&mut self, champion_index: usize) {
@@ -337,6 +424,91 @@ impl Task5Tab {
         self.teams
             .iter()
             .position(|team| team.current_place == Some(1))
+    }
+
+    fn draw_statistics(&self, ui: &mut egui::Ui) {
+        let Some(run) = &self.stats else {
+            return;
+        };
+
+        ui.heading(format!("Statistics ({} runs)", run.runs));
+
+        let runs = run.runs as f64;
+
+        let mut indices: Vec<usize> = (0..self.teams.len()).collect();
+        indices.sort_by(|&left, &right| {
+            run.titles[right].cmp(&run.titles[left]).then_with(|| {
+                self.teams[right]
+                    .rating
+                    .partial_cmp(&self.teams[left].rating)
+                    .unwrap()
+            })
+        });
+
+        let labels: Vec<String> = indices
+            .iter()
+            .map(|&index| self.teams[index].name.clone())
+            .collect();
+        let title_share: Vec<f64> = indices
+            .iter()
+            .map(|&index| run.titles[index] as f64 / runs * 100.0)
+            .collect();
+        let final_share: Vec<f64> = indices
+            .iter()
+            .map(|&index| run.finals[index] as f64 / runs * 100.0)
+            .collect();
+
+        stats::grouped_bar_chart(
+            ui,
+            "task5_stats_chart",
+            &labels,
+            &[
+                stats::Series {
+                    name: "reached final, %",
+                    values: &final_share,
+                    color: colors::ORANGE,
+                },
+                stats::Series {
+                    name: "won the cup, %",
+                    values: &title_share,
+                    color: colors::BLUE,
+                },
+            ],
+        );
+
+        ui.add_space(8.0);
+
+        egui::Grid::new("task5_stats_grid")
+            .striped(true)
+            .spacing([16.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Team");
+                ui.label("Rating");
+                ui.label("Titles");
+                ui.label("Title %");
+                ui.label("Final %");
+                ui.label("Avg. matches won");
+                ui.end_row();
+
+                for &index in &indices {
+                    ui.label(&self.teams[index].name);
+                    ui.label(format!("{:.0}", self.teams[index].rating));
+                    ui.label(run.titles[index].to_string());
+                    ui.label(format!(
+                        "{:.2}",
+                        run.titles[index] as f64 / runs * 100.0
+                    ));
+                    ui.label(format!(
+                        "{:.2}",
+                        run.finals[index] as f64 / runs * 100.0
+                    ));
+                    ui.label(format!(
+                        "{:.3}",
+                        run.rounds_won[index] as f64 / runs
+                    ));
+                    ui.end_row();
+                }
+            });
     }
 
     fn draw_team_info(&self, ui: &mut egui::Ui) {
@@ -556,16 +728,64 @@ impl Tab for Task5Tab {
             }
         });
 
+        ui.add_space(8.0);
+
+        if stats::runs_control(ui, &mut self.runs) {
+            self.run_many();
+        }
+
         ui.separator();
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                if self.stats.is_some() {
+                    self.draw_statistics(ui);
+                    ui.add_space(16.0);
+                }
+
                 self.draw_round_results(ui);
                 ui.add_space(16.0);
                 self.draw_standings(ui);
                 ui.add_space(16.0);
                 self.draw_team_info(ui);
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weakest_team_beats_strongest_about_five_percent_of_the_time() {
+        let p = winner_probability(1.0, 100.0);
+        assert!((p - 0.05).abs() < 0.005, "{p}");
+
+        assert!((winner_probability(50.0, 50.0) - 0.5).abs() < 1e-12);
+        assert!(
+            (winner_probability(1.0, 100.0) + winner_probability(100.0, 1.0)
+                - 1.0)
+                .abs()
+                < 1e-12
+        );
+    }
+
+    #[test]
+    fn every_run_has_exactly_one_champion() {
+        let ratings = [92.0, 95.0, 90.0, 87.0, 89.0, 88.0, 91.0, 84.0];
+        let bracket: Vec<usize> = (0..ratings.len()).collect();
+
+        let started = std::time::Instant::now();
+
+        for _ in 0..10_000 {
+            let won =
+                simulate_tournament(&ratings, &bracket, &mut || rand::random());
+
+            assert_eq!(won.iter().filter(|&&wins| wins == 3).count(), 1);
+            assert_eq!(won.iter().sum::<usize>(), ratings.len() - 1);
+        }
+
+        eprintln!("10000 tournaments: {:?}", started.elapsed());
     }
 }
