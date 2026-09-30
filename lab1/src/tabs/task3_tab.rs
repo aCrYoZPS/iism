@@ -192,125 +192,136 @@ impl Tab for Task3Tab {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading(self.name());
-
-        ui.add_space(8.0);
-
-        ui.group(|ui| {
-            ui.set_min_width(ui.available_width());
-
-            ui.horizontal(|ui| {
-                ui.label("P(A):");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.p_a_text)
-                        .hint_text("0.0 .. 1.0")
-                        .desired_width(180.0),
-                );
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("P(B | A):");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.p_b_given_a_text)
-                        .hint_text("0.0 .. 1.0")
-                        .desired_width(180.0),
-                );
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("P(B):");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.p_b_text)
-                        .hint_text("0.0 .. 1.0")
-                        .desired_width(180.0),
-                );
-            });
-
-            ui.add_space(8.0);
-
-            if ui.button("Compute").clicked() {
-                self.probabilities = None;
-                self.draw = None;
-                self.outcome = None;
-
-                match self.compute() {
-                    Ok(()) => self.parse_error = None,
-                    Err(error) => self.parse_error = Some(error),
-                }
-            }
-
-            if let Some(error) = &self.parse_error {
-                ui.add_space(6.0);
-                ui.label(egui::RichText::new(error).color(colors::RED));
-            }
-
-            ui.separator();
-
-            let font = egui::TextStyle::Body.resolve(ui.style());
-
-            if let Some([p_ab, p_a_not_b, p_not_a_b, p_not_a_not_b]) =
-                self.probabilities
-            {
-                ui.label(format!("P(A, B) = {p_ab:.4}"));
-                ui.label(format!("P(A, ¬B) = {p_a_not_b:.4}"));
-                ui.label(format!("P(¬A, B) = {p_not_a_b:.4}"));
-                ui.label(format!("P(¬A, ¬B) = {p_not_a_not_b:.4}"));
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.heading(self.name());
 
                 ui.add_space(8.0);
 
-                let draw = self.draw.expect("draw is set with probabilities");
-                let outcome =
-                    self.outcome.expect("outcome is set with probabilities");
+                ui.group(|ui| {
+                    ui.set_min_width(ui.available_width());
 
-                let mut draw_job = LayoutJob::default();
-                draw_job.append(
-                    "Draw: ",
-                    0.0,
-                    TextFormat::simple(
-                        font.clone(),
-                        ui.visuals().weak_text_color(),
-                    ),
-                );
-                draw_job.append(
-                    &format!("{draw:.4}"),
-                    0.0,
-                    TextFormat::simple(
-                        font.clone(),
-                        ui.visuals().weak_text_color(),
-                    ),
-                );
-                ui.label(draw_job);
+                    ui.horizontal(|ui| {
+                        ui.label("P(A):");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.p_a_text)
+                                .hint_text("0.0 .. 1.0")
+                                .desired_width(180.0),
+                        );
+                    });
 
-                let mut result_job = LayoutJob::default();
-                result_job.append(
-                    "Result: ",
-                    0.0,
-                    TextFormat::simple(font.clone(), ui.visuals().text_color()),
-                );
-                result_job.append(
-                    outcome.label(),
-                    0.0,
-                    TextFormat::simple(font, colors::GREEN),
-                );
-                ui.label(result_job);
-            } else if self.parse_error.is_none() {
-                ui.label(
-                    egui::RichText::new(
-                        "Enter probabilities and press Compute.",
-                    )
-                    .weak(),
-                );
-            }
+                    ui.horizontal(|ui| {
+                        ui.label("P(B | A):");
+                        ui.add(
+                            egui::TextEdit::singleline(
+                                &mut self.p_b_given_a_text,
+                            )
+                            .hint_text("0.0 .. 1.0")
+                            .desired_width(180.0),
+                        );
+                    });
 
-            ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("P(B):");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.p_b_text)
+                                .hint_text("0.0 .. 1.0")
+                                .desired_width(180.0),
+                        );
+                    });
 
-            if stats::runs_control(ui, &mut self.runs) {
-                self.parse_error = self.run_many().err();
-            }
+                    ui.add_space(8.0);
 
-            ui.add_space(8.0);
+                    if ui.button("Compute").clicked() {
+                        self.probabilities = None;
+                        self.draw = None;
+                        self.outcome = None;
 
-            self.draw_stats(ui);
-        });
+                        match self.compute() {
+                            Ok(()) => self.parse_error = None,
+                            Err(error) => self.parse_error = Some(error),
+                        }
+                    }
+
+                    if let Some(error) = &self.parse_error {
+                        ui.add_space(6.0);
+                        ui.label(egui::RichText::new(error).color(colors::RED));
+                    }
+
+                    ui.separator();
+
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+
+                    if let Some([p_ab, p_a_not_b, p_not_a_b, p_not_a_not_b]) =
+                        self.probabilities
+                    {
+                        ui.label(format!("P(A, B) = {p_ab:.4}"));
+                        ui.label(format!("P(A, ¬B) = {p_a_not_b:.4}"));
+                        ui.label(format!("P(¬A, B) = {p_not_a_b:.4}"));
+                        ui.label(format!("P(¬A, ¬B) = {p_not_a_not_b:.4}"));
+
+                        ui.add_space(8.0);
+
+                        let draw =
+                            self.draw.expect("draw is set with probabilities");
+                        let outcome = self
+                            .outcome
+                            .expect("outcome is set with probabilities");
+
+                        let mut draw_job = LayoutJob::default();
+                        draw_job.append(
+                            "Draw: ",
+                            0.0,
+                            TextFormat::simple(
+                                font.clone(),
+                                ui.visuals().weak_text_color(),
+                            ),
+                        );
+                        draw_job.append(
+                            &format!("{draw:.4}"),
+                            0.0,
+                            TextFormat::simple(
+                                font.clone(),
+                                ui.visuals().weak_text_color(),
+                            ),
+                        );
+                        ui.label(draw_job);
+
+                        let mut result_job = LayoutJob::default();
+                        result_job.append(
+                            "Result: ",
+                            0.0,
+                            TextFormat::simple(
+                                font.clone(),
+                                ui.visuals().text_color(),
+                            ),
+                        );
+                        result_job.append(
+                            outcome.label(),
+                            0.0,
+                            TextFormat::simple(font, colors::GREEN),
+                        );
+                        ui.label(result_job);
+                    } else if self.parse_error.is_none() {
+                        ui.label(
+                            egui::RichText::new(
+                                "Enter probabilities and press Compute.",
+                            )
+                            .weak(),
+                        );
+                    }
+
+                    ui.separator();
+
+                    if stats::runs_control(ui, &mut self.runs) {
+                        self.parse_error = self.run_many().err();
+                    }
+
+                    ui.add_space(8.0);
+
+                    self.draw_stats(ui);
+                });
+            });
     }
 }

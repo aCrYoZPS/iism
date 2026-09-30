@@ -41,7 +41,6 @@ impl eframe::App for LabApp {
             });
         });
 
-        // Content
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(tab) = self.tabs.get_mut(self.selected_tab) {
                 tab.ui(ui);
