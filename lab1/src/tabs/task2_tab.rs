@@ -1,5 +1,7 @@
 use std::vec;
 
+const MAX_EVENTS: usize = 12;
+
 use common::{colors, sampling, stats, tab::Tab, utils};
 use eframe::egui::{
     self,
@@ -10,7 +12,25 @@ use eframe::egui::{
 struct RunStats {
     runs: u32,
     probabilities: Vec<f64>,
-    hits: Vec<u64>,
+    counts: Vec<u64>,
+    events: usize,
+}
+
+fn combination_probabilities(p: &[f64]) -> Vec<f64> {
+    (0..1usize << p.len())
+        .map(|mask| {
+            p.iter()
+                .enumerate()
+                .map(|(i, &pi)| if mask >> i & 1 == 1 { pi } else { 1.0 - pi })
+                .product()
+        })
+        .collect()
+}
+
+fn combination_label(mask: usize, events: usize) -> String {
+    (0..events)
+        .map(|i| if mask >> i & 1 == 1 { 'T' } else { 'F' })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -36,27 +56,36 @@ impl Task2Tab {
     }
 
     fn run_many(&mut self) -> Result<(), String> {
-        let probabilities = utils::parse_probability_list(&self.input_text)?;
+        let p = utils::parse_probability_list(&self.input_text)?;
 
-        if probabilities.is_empty() {
+        if p.is_empty() {
             return Err("Enter at least one probability.".to_owned());
         }
+        if p.len() > MAX_EVENTS {
+            return Err(format!(
+                "Too many events: {} (max {MAX_EVENTS}, {} combinations).",
+                p.len(),
+                1usize << MAX_EVENTS
+            ));
+        }
 
-        let mut hits = vec![0u64; probabilities.len()];
+        let mut counts = vec![0u64; 1 << p.len()];
 
         for _ in 0..self.runs {
-            for (hit_count, &probability) in hits.iter_mut().zip(&probabilities)
-            {
-                if sampling::is_hit(rand::random(), probability) {
-                    *hit_count += 1;
+            let mut mask = 0usize;
+            for (i, &pi) in p.iter().enumerate() {
+                if sampling::is_hit(rand::random(), pi) {
+                    mask |= 1 << i;
                 }
             }
+            counts[mask] += 1;
         }
 
         self.stats = Some(RunStats {
             runs: self.runs,
-            probabilities,
-            hits,
+            probabilities: combination_probabilities(&p),
+            counts,
+            events: p.len(),
         });
 
         Ok(())
@@ -67,20 +96,32 @@ impl Task2Tab {
             return;
         };
 
-        ui.heading(format!("Statistics ({} runs)", run.runs));
+        ui.heading(format!(
+            "Statistics ({} runs, {} combinations)",
+            run.runs,
+            run.counts.len()
+        ));
 
-        let labels: Vec<String> = (1..=run.probabilities.len())
-            .map(|index| format!("P{index}"))
+        let labels: Vec<String> = (0..run.counts.len())
+            .map(|m| combination_label(m, run.events))
             .collect();
+        egui::ScrollArea::vertical()
+            .id_salt("task2_stats_scroll")
+            .max_height(320.0)
+            .show(ui, |ui| {
+                stats::show_frequency_report(
+                    ui,
+                    "task2_stats",
+                    run.runs as u64,
+                    &labels,
+                    &run.probabilities,
+                    &run.counts,
+                );
+            });
 
-        stats::show_frequency_report(
-            ui,
-            "task2_stats",
-            run.runs as u64,
-            &labels,
-            &run.probabilities,
-            &run.hits,
-        );
+        if let Some(test) = stats::chi_square(&run.counts, &run.probabilities) {
+            stats::show_chi_square(ui, &test);
+        }
     }
 }
 
@@ -198,35 +239,6 @@ impl Tab for Task2Tab {
             ui.add_space(8.0);
 
             self.draw_stats(ui);
-
-            // if let Some(draw) = self.last_draw {
-            //     let hit = draw < self.probability;
-            //     let (label, color) = if hit {
-            //         ("True", egui::Color32::from_rgb(0x2e, 0x7d, 0x32))
-            //     } else {
-            //         ("False", egui::Color32::from_rgb(0xc6, 0x28, 0x28))
-            //     };
-
-            //     ui.label(
-            //         egui::RichText::new(format!(
-            //             "Draw: {draw:.3} · Probability {:.3}",
-            //             self.probability
-            //         ))
-            //         .weak(),
-            //     );
-
-            //     job.append(
-            //         "Result: ",
-            //         0.0,
-            //         TextFormat::simple(font.clone(), ui.visuals().text_color()),
-            //     );
-            //     job.append(label, 0.0, TextFormat::simple(font, color));
-
-            //     ui.label(job);
-            // } else {
-            //     ui.label(egui::RichText::new("-").weak());
-            //     ui.label(egui::RichText::new(" ").weak());
-            // }
         });
     }
 }
