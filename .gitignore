@@ -1,1 +1,14 @@
 **/target
+
+# project: Steam review analysis (large inputs, regenerable outputs, local notes)
+project/datasets/
+project/processed/
+project/figures/
+project/results/
+project/.vibe-wise/
+__pycache__/
+
+# learning notes and lab assignments
+/.vibe-wise/
+/labs/
+**/.venv/

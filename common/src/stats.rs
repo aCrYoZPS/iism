@@ -5,7 +5,7 @@ use egui_plot::{
     Bar, BarChart, GridMark, HLine, Legend, Line, Plot, PlotPoints,
 };
 
-use crate::common::colors;
+use crate::colors;
 
 pub const DEFAULT_RUNS: u32 = 10_000;
 const MAX_RUNS: u32 = 10_000_000;

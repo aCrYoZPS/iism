@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
-use crate::common::{colors, stats, tab::Tab};
+use common::{colors, stats, tab::Tab};
 
 use eframe::egui;
 use rand::seq::SliceRandom;

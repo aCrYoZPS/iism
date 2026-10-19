@@ -1,4 +1,4 @@
-use crate::common::{colors, sampling, stats, tab::Tab, utils};
+use common::{colors, sampling, stats, tab::Tab, utils};
 use eframe::egui::{
     self,
     text::{LayoutJob, TextFormat},

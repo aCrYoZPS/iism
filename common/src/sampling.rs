@@ -52,7 +52,7 @@ mod tests {
             counts[pick_index(&cumulative, rand::random())] += 1;
         }
 
-        let test = crate::common::stats::chi_square(&counts, &probabilities)
+        let test = crate::stats::chi_square(&counts, &probabilities)
             .expect("enough categories");
 
         assert!(test.statistic < 3.0 * test.critical, "{test:?}");

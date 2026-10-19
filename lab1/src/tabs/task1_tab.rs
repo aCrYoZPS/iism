@@ -1,4 +1,4 @@
-use crate::common::{colors, sampling, stats, tab::Tab};
+use common::{colors, sampling, stats, tab::Tab};
 use eframe::egui::{self, text::LayoutJob, text::TextFormat};
 
 const DEFAULT_PROBABILITY: f64 = 0.5;
