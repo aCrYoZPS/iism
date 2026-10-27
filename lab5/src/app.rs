@@ -24,23 +24,33 @@ struct Loaded {
     marking: Marking,
     /// Markings before each step, for "Back".
     history: Vec<Marking>,
+    /// Text of each marking graph vertex, see `format_marking`.
+    labels: Vec<String>,
 }
 
 impl Loaded {
     fn new(net: Net, initial: Marking) -> Self {
         let graph =
             ReachabilityGraph::build(&net, initial.clone(), VERTEX_LIMIT);
-        Self {
+        let mut loaded = Self {
             class: analysis::classify(&net),
             props: analysis::analyze(&graph, &net),
             pairs: graph.concurrent_pairs(&net),
             layout: Layout::circle(net.places.len(), net.transitions.len()),
             marking: initial.clone(),
             history: Vec::new(),
+            labels: Vec::new(),
             graph,
             initial,
             net,
-        }
+        };
+        loaded.labels = loaded
+            .graph
+            .markings
+            .iter()
+            .map(|m| loaded.format_marking(m))
+            .collect();
+        loaded
     }
 
     fn fire(&mut self, transition: usize) {
@@ -79,7 +89,14 @@ impl Loaded {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum View {
+    Net,
+    MarkingGraph,
+}
+
 pub struct App {
+    view: View,
     text: String,
     /// Kept when the text stops parsing, so the picture does not vanish while
     /// the user is typing.
@@ -91,6 +108,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let mut app = Self {
+            view: View::Net,
             text: nets::RIGHT_TEXT.to_string(),
             loaded: None,
             errors: Vec::new(),
@@ -310,15 +328,46 @@ impl eframe::App for App {
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(loaded) = &mut self.loaded {
-                let clicked = canvas::show(
-                    ui,
-                    &loaded.net,
-                    &loaded.marking,
-                    &mut loaded.layout,
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.view, View::Net, "Net");
+                ui.selectable_value(
+                    &mut self.view,
+                    View::MarkingGraph,
+                    "Marking graph",
                 );
-                if let Some(transition) = clicked {
-                    loaded.fire(transition);
+            });
+            let Some(loaded) = &mut self.loaded else {
+                return;
+            };
+            match self.view {
+                View::Net => {
+                    let clicked = canvas::show(
+                        ui,
+                        &loaded.net,
+                        &loaded.marking,
+                        &mut loaded.layout,
+                    );
+                    if let Some(transition) = clicked {
+                        loaded.fire(transition);
+                    }
+                }
+                View::MarkingGraph => {
+                    let vertices = loaded.graph.markings.len();
+                    if vertices > canvas::MAX_GRAPH_VERTICES {
+                        ui.label(format!(
+                            "The marking graph has {vertices} vertices; it is \
+                             drawn only up to {}.",
+                            canvas::MAX_GRAPH_VERTICES
+                        ));
+                    } else {
+                        canvas::show_graph(
+                            ui,
+                            &loaded.net,
+                            &loaded.graph,
+                            &loaded.labels,
+                            loaded.graph.index_of(&loaded.marking),
+                        );
+                    }
                 }
             }
         });
